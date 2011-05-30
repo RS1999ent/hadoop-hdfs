@@ -50,6 +50,8 @@ import org.apache.hadoop.net.NetUtils;
 import org.apache.hadoop.security.token.Token;
 import org.apache.hadoop.util.StringUtils;
 
+import edu.berkeley.xtrace.*;
+
 /****************************************************************
  * DFSInputStream provides bytes from a named file.  It handles 
  * negotiation of the namenode and various datanodes as necessary.
