@@ -75,6 +75,8 @@ import org.apache.hadoop.util.Progressable;
 import org.apache.hadoop.util.PureJavaCrc32;
 import org.apache.hadoop.util.StringUtils;
 
+import edu.berkeley.xtrace.*;
+
 /****************************************************************
  * DFSOutputStream creates files from a stream of bytes.
  *
