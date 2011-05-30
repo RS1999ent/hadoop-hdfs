@@ -56,6 +56,8 @@ import org.apache.hadoop.security.token.Token;
 import org.apache.hadoop.util.DataChecksum;
 import org.apache.hadoop.util.StringUtils;
 
+import edu.berkeley.xtrace.*;
+
 /**
  * Thread for processing incoming/outgoing data stream.
  */
@@ -173,14 +175,20 @@ class DataXceiver extends DataTransferProtocol.Receiver
     updateCurrentThreadName("Sending block " + block);
     try {
       try {
+        XTraceContext.callStart("Datanode", "newBlockSender");
         blockSender = new BlockSender(block, startOffset, length,
             true, true, false, datanode, clientTraceFmt);
+        XTraceContext.callEnd("Datanode", "newBlockSender");
       } catch(IOException e) {
-        ERROR.write(out);
+        XTraceContext.opReadBlockReply("Datanode");
+        ERROR.write(out, XTraceContext.getThreadContext());
         throw e;
       }
 
-      SUCCESS.write(out); // send op status
+      XTraceContext.opReadBlockReply("Datanode");
+      SUCCESS.write(out, XTraceContext.getThreadContext()); // send op status
+      XTraceContext.setThreadContext(null);
+
       long read = blockSender.sendBlock(out, baseStream, null); // send data
       
       datanode.metrics.incrBytesRead((int) read);
@@ -272,11 +280,13 @@ class DataXceiver extends DataTransferProtocol.Receiver
       if (isDatanode || 
           stage != BlockConstructionStage.PIPELINE_CLOSE_RECOVERY) {
         // open a block receiver
+        XTraceContext.callStart("Datanode", "newBlockReceiver");
         blockReceiver = new BlockReceiver(block, in, 
             s.getRemoteSocketAddress().toString(),
             s.getLocalSocketAddress().toString(),
             stage, newGs, minBytesRcvd, maxBytesRcvd,
             clientname, srcDataNode, datanode);
+        XTraceContext.callEnd("Datanode", "newBlockReceiver");
       } else {
         datanode.data.recoverClose(block, newGs, minBytesRcvd);
       }
@@ -303,7 +313,9 @@ class DataXceiver extends DataTransferProtocol.Receiver
                          NetUtils.getOutputStream(mirrorSock, writeTimeout),
                          SMALL_BUFFER_SIZE));
           mirrorIn = new DataInputStream(NetUtils.getInputStream(mirrorSock));
-
+          
+          XTraceContext.opWriteBlockRequest("Datanode");
+          
           DataTransferProtocol.Sender.opWriteBlock(mirrorOut, originalBlock,
               pipelineSize, stage, newGs, minBytesRcvd, maxBytesRcvd, clientname,
               srcDataNode, targets, blockToken);
@@ -317,6 +329,10 @@ class DataXceiver extends DataTransferProtocol.Receiver
           if (isClient) {
             mirrorInStatus = DataTransferProtocol.Status.read(mirrorIn);
             firstBadLink = Text.readString(mirrorIn);
+            if (mirrorInStatus != SUCCESS)
+              XTraceContext.opWriteBlockFailure("Datanode");
+            else
+              XTraceContext.opWriteBlockSuccess("Datanode");
             if (LOG.isDebugEnabled() || mirrorInStatus != SUCCESS) {
               LOG.info("Datanode " + targets.length +
                        " got response for connect ack " +
@@ -327,7 +343,8 @@ class DataXceiver extends DataTransferProtocol.Receiver
 
         } catch (IOException e) {
           if (isClient) {
-            ERROR.write(replyOut);
+            XTraceContext.opWriteBlockReply("Datanode");
+            ERROR.write(replyOut, XTraceContext.getThreadContext());
             Text.writeString(replyOut, mirrorNode);
             replyOut.flush();
           }
@@ -355,10 +372,13 @@ class DataXceiver extends DataTransferProtocol.Receiver
                    " forwarding connect ack to upstream firstbadlink is " +
                    firstBadLink);
         }
-        mirrorInStatus.write(replyOut);
+        XTraceContext.opWriteBlockReply("Datanode");
+        mirrorInStatus.write(replyOut, XTraceContext.getThreadContext());
         Text.writeString(replyOut, firstBadLink);
         replyOut.flush();
       }
+      
+      XTraceContext.setThreadContext(null);;
 
       // receive the block and mirror to the next target
       if (blockReceiver != null) {

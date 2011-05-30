@@ -247,6 +247,9 @@ class DFSOutputStream extends FSOutputSummer implements Syncable {
 
       PacketHeader header = new PacketHeader(
         pktLen, offsetInBlock, seqno, lastPacketInBlock, dataLen);
+
+      header.metadata = XTraceContext.getThreadContext();
+
       header.putInBuffer(buffer);
       
       buffer.reset();
@@ -384,6 +387,7 @@ class DFSOutputStream extends FSOutputSummer implements Syncable {
         DFSClient.LOG.debug("Closing old block " + block);
       }
       this.setName("DataStreamer for file " + src);
+      XTraceContext.endTrace();
       closeResponder();
       closeStream();
       nodes = null;
@@ -453,12 +457,16 @@ class DFSOutputStream extends FSOutputSummer implements Syncable {
             if(DFSClient.LOG.isDebugEnabled()) {
               DFSClient.LOG.debug("Allocating new block");
             }
+            XTraceContext.newTrace();
+            XTraceContext.newBlock("DFSClient");
             nodes = nextBlockOutputStream(src);
             initDataStreaming();
           } else if (stage == BlockConstructionStage.PIPELINE_SETUP_APPEND) {
             if(DFSClient.LOG.isDebugEnabled()) {
               DFSClient.LOG.debug("Append to block " + block);
             }
+            XTraceContext.newTrace();
+            XTraceContext.appendBlock("DFSClient");
             setupPipelineForAppendOrRecovery();
             initDataStreaming();
           }
@@ -508,6 +516,7 @@ class DFSOutputStream extends FSOutputSummer implements Syncable {
           }
 
           // write out data to remote datanode
+          XTraceContext.sendPacket("DFSClient", one.seqno, null);
           blockStream.write(buf.array(), buf.position(), buf.remaining());
           blockStream.flush();
           lastPacket = System.currentTimeMillis();
@@ -631,6 +640,9 @@ class DFSOutputStream extends FSOutputSummer implements Syncable {
       private DatanodeInfo[] targets = null;
       private boolean isLastPacketInBlock = false;
 
+      //ww2
+      private XTraceMetadata previousAck = null;
+
       ResponseProcessor (DatanodeInfo[] targets) {
         this.targets = targets;
       }
@@ -650,6 +662,7 @@ class DFSOutputStream extends FSOutputSummer implements Syncable {
             }
             
             long seqno = ack.getSeqno();
+            XTraceContext.setThreadContext(ack.metadata);
             // processes response status from datanodes.
             for (int i = ack.getNumOfReplies()-1; i >=0  && dfsClient.clientRunning; i--) {
               final DataTransferProtocol.Status reply = ack.getReply(i);
@@ -661,7 +674,7 @@ class DFSOutputStream extends FSOutputSummer implements Syncable {
                     targets[i].getName());
               }
             }
-            
+            XTraceContext.receiveAck("DFSClient", seqno); 
             assert seqno != PipelineAck.UNKOWN_SEQNO : 
               "Ack for unkown seqno should be a failed ack: " + ack;
             if (seqno == Packet.HEART_BEAT_SEQNO) {  // a heartbeat ack
@@ -678,6 +691,7 @@ class DFSOutputStream extends FSOutputSummer implements Syncable {
                                     " for block " + block +
                                     one.seqno + " but received " + seqno);
             }
+            XTraceContext.acceptAck("DFSClient", seqno, previousAck); 
             isLastPacketInBlock = one.lastPacketInBlock;
             // update bytesAcked
             block.setNumBytes(one.getLastByteOffsetBlock());
@@ -704,6 +718,7 @@ class DFSOutputStream extends FSOutputSummer implements Syncable {
             }
           }
         }
+        XTraceContext.endBlock("DFSClient");
       }
 
       void close() {
@@ -1017,6 +1032,7 @@ class DFSOutputStream extends FSOutputSummer implements Syncable {
         blockReplyStream = new DataInputStream(NetUtils.getInputStream(s));
 
         // send the request
+        XTraceContext.opWriteBlockRequest("DFSClient");
         DataTransferProtocol.Sender.opWriteBlock(out, block,
             nodes.length, recoveryFlag ? stage.getRecoveryStage() : stage, newGS, 
             block.getNumBytes(), bytesSent, dfsClient.clientName, null, nodes,
@@ -1029,6 +1045,8 @@ class DFSOutputStream extends FSOutputSummer implements Syncable {
         firstBadLink = Text.readString(blockReplyStream);
         if (pipelineStatus != SUCCESS) {
           if (pipelineStatus == ERROR_ACCESS_TOKEN) {
+            XTraceContext.opWriteBlockFailure("DFSClient");
+            XTraceContext.endTrace();
             throw new InvalidBlockTokenException(
                 "Got access token error for connect ack with firstBadLink as "
                     + firstBadLink);
@@ -1037,6 +1055,7 @@ class DFSOutputStream extends FSOutputSummer implements Syncable {
                 + firstBadLink);
           }
         }
+        XTraceContext.opWriteBlockSuccess("DFSClient");
 
         blockStream = out;
         result =  true; // success

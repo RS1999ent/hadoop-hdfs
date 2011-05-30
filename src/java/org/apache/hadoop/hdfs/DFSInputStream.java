@@ -101,6 +101,8 @@ public class DFSInputStream extends FSInputStream {
   
   DFSInputStream(DFSClient dfsClient, String src, int buffersize, boolean verifyChecksum
                  ) throws IOException, UnresolvedLinkException {
+    XTraceContext.newTrace();
+    XTraceContext.callStart("DFSClient", "open");
     this.dfsClient = dfsClient;
     this.verifyChecksum = verifyChecksum;
     this.buffersize = buffersize;
@@ -109,6 +111,8 @@ public class DFSInputStream extends FSInputStream {
         10 * dfsClient.defaultBlockSize);
     timeWindow = this.dfsClient.conf.getInt(DFSConfigKeys.DFS_CLIENT_RETRY_WINDOW_BASE, timeWindow);
     openInfo();
+    XTraceContext.callEnd("DFSClient", "open");
+    XTraceContext.endTrace();
   }
 
   /**
@@ -255,8 +259,10 @@ public class DFSInputStream extends FSInputStream {
     }
     else {
       // search cached blocks first
+      XTraceContext.cacheSearch("DFSClient", "BlockLocation");
       int targetBlockIdx = locatedBlocks.findBlock(offset);
       if (targetBlockIdx < 0) { // block is not cached
+        XTraceContext.cacheMiss("DFSClient", "BlockLocation");
         targetBlockIdx = LocatedBlocks.getInsertIndex(targetBlockIdx);
         // fetch more blocks
         LocatedBlocks newBlocks;
@@ -264,6 +270,10 @@ public class DFSInputStream extends FSInputStream {
         assert (newBlocks != null) : "Could not find target position " + offset;
         locatedBlocks.insertRange(targetBlockIdx, newBlocks.getLocatedBlocks());
       }
+      //ww2
+      else
+        XTraceContext.cacheHit("DFSClient", "BlockLocation");
+        
       blk = locatedBlocks.get(targetBlockIdx);
     }
 
@@ -377,7 +387,8 @@ public class DFSInputStream extends FSInputStream {
     //
     DatanodeInfo chosenNode = null;
     int refetchToken = 1; // only need to get a new access token once
-    
+    XTraceContext.newTrace();
+    XTraceContext.callStart("DFSClient", "blockSeekTo");
     while (true) {
       //
       // Compute desired block
@@ -401,6 +412,8 @@ public class DFSInputStream extends FSInputStream {
             accessToken, 
             offsetIntoBlock, blk.getNumBytes() - offsetIntoBlock,
             buffersize, verifyChecksum, dfsClient.clientName);
+        XTraceContext.callEnd("DFSClient", "blockSeekTo");
+        XTraceContext.endTrace();
         return chosenNode;
       } catch (IOException ex) {
         if (ex instanceof InvalidBlockTokenException && refetchToken > 0) {

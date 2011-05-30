@@ -53,6 +53,8 @@ import org.apache.hadoop.util.DataChecksum;
 import org.apache.hadoop.util.PureJavaCrc32;
 import org.apache.hadoop.util.StringUtils;
 
+import edu.berkeley.xtrace.*;
+
 /** A class that receives a block and writes to its own disk, meanwhile
  * may copies it to another site. If a throttler is provided,
  * streaming throttling is also supported.
@@ -82,6 +84,10 @@ class BlockReceiver implements Closeable, FSConstants {
   private Checksum partialCrc = null;
   private final DataNode datanode;
   volatile private boolean mirrorError;
+
+  //ww2 
+  private XTraceMetadata previousAccept = null;
+  private XTraceMetadata previousSend = null;
 
   /** The client name.  It is empty if a datanode is the client */
   private final String clientname;
@@ -466,6 +472,8 @@ class BlockReceiver implements Closeable, FSConstants {
     header.readFields(buf);
     int endOfHeader = buf.position();
     buf.reset();
+    XTraceContext.setThreadContext(header.metadata);
+    XTraceContext.receivePacket("Datanode", header.getSeqno());
 
     // Sanity check the header
     if (header.getOffsetInBlock() > replicaInfo.getNumBytes()) {
@@ -479,6 +487,7 @@ class BlockReceiver implements Closeable, FSConstants {
                             header.getOffsetInBlock() + ": " +
                             header.getDataLen()); 
     }
+    previousAccept = XTraceContext.acceptPacket("Datanode", header.getSeqno(), previousAccept);
 
     return receivePacket(
       header.getOffsetInBlock(),
@@ -525,6 +534,14 @@ class BlockReceiver implements Closeable, FSConstants {
     //First write the packet to the mirror:
     if (mirrorOut != null && !mirrorError) {
       try {
+        previousSend = XTraceContext.sendPacket("Datanode", seqno, previousSend);
+        buf.mark();
+        buf.position(endOfHeader - 17);
+        if (XTraceContext.isValid())
+          buf.put(XTraceContext.getThreadContext().pack());
+        else
+          buf.put(new byte[17]);
+        buf.reset();
         mirrorOut.write(buf.array(), buf.position(), buf.remaining());
         mirrorOut.flush();
       } catch (IOException e) {
@@ -833,6 +850,9 @@ class BlockReceiver implements Closeable, FSConstants {
     private final PacketResponderType type;
     /** for log and error messages */
     private final String myString; 
+    
+    private XTraceMetadata previousAccept = null;
+    private XTraceMetadata previousAck = null;
 
     @Override
     public String toString() {
@@ -867,7 +887,7 @@ class BlockReceiver implements Closeable, FSConstants {
     synchronized void enqueue(final long seqno,
         final boolean lastPacketInBlock, final long offsetInBlock) {
       if (running) {
-        final Packet p = new Packet(seqno, lastPacketInBlock, offsetInBlock);
+        final Packet p = new Packet(seqno, lastPacketInBlock, offsetInBlock, XTraceContext.getThreadContext());
         if(LOG.isDebugEnabled()) {
           LOG.debug(myString + ": enqueue " + p);
         }
@@ -892,6 +912,7 @@ class BlockReceiver implements Closeable, FSConstants {
         LOG.debug(myString + ": closing");
       }
       running = false;
+      previousSend = previousAccept = null;
       notifyAll();
     }
 
@@ -915,10 +936,13 @@ class BlockReceiver implements Closeable, FSConstants {
                   && !mirrorError) {
                 // read an ack from downstream datanode
                 ack.readFields(downstreamIn);
+                XTraceContext.setThreadContext(ack.metadata);
+
                 if (LOG.isDebugEnabled()) {
                   LOG.debug(myString + " got " + ack);
                 }
                 seqno = ack.getSeqno();
+                XTraceContext.receiveAck("Datanode", seqno);
               }
               if (seqno != PipelineAck.UNKOWN_SEQNO
                   || type == PacketResponderType.LAST_IN_PIPELINE) {
@@ -940,6 +964,10 @@ class BlockReceiver implements Closeable, FSConstants {
                     throw new IOException(myString + "seqno: expected="
                         + expected + ", received=" + seqno);
                   }
+                  if (type == PacketResponderType.HAS_DOWNSTREAM_IN_PIPELINE){
+                    previousAccept = XTraceContext.acceptAck("Datanode", seqno, previousAccept);
+                  } else
+                    XTraceContext.setThreadContext(pkt.metadata);
                   lastPacketInBlock = pkt.lastPacketInBlock;
                 }
               }
@@ -1008,6 +1036,8 @@ class BlockReceiver implements Closeable, FSConstants {
               }
             }
             PipelineAck replyAck = new PipelineAck(expected, replies);
+            previousAck = XTraceContext.sendAck("Datanode", expected, previousAck);
+            replyAck.metadata = XTraceContext.getThreadContext();
             
             // send my ack back to upstream datanode
             replyAck.write(upstreamOut);
@@ -1046,6 +1076,7 @@ class BlockReceiver implements Closeable, FSConstants {
           }
         }
       }
+      XTraceContext.setThreadContext(null);
       LOG.info(myString + " terminating");
     }
     
@@ -1067,11 +1098,19 @@ class BlockReceiver implements Closeable, FSConstants {
     final long seqno;
     final boolean lastPacketInBlock;
     final long offsetInBlock;
+    XTraceMetadata metadata = null;
 
     Packet(long seqno, boolean lastPacketInBlock, long offsetInBlock) {
       this.seqno = seqno;
       this.lastPacketInBlock = lastPacketInBlock;
       this.offsetInBlock = offsetInBlock;
+    }
+    
+    Packet(long seqno, boolean lastPacketInBlock, long offsetInBlock, XTraceMetadata metadata) {
+      this.seqno = seqno;
+      this.lastPacketInBlock = lastPacketInBlock;
+      this.offsetInBlock = offsetInBlock;
+      this.metadata = metadata;
     }
 
     @Override

@@ -101,6 +101,8 @@ import org.apache.hadoop.security.token.Token;
 import org.apache.hadoop.util.Progressable;
 import org.apache.hadoop.util.StringUtils;
 
+import edu.berkeley.xtrace.*;
+
 /********************************************************
  * DFSClient can connect to a Hadoop Filesystem and 
  * perform basic file tasks.  It uses the ClientProtocol
@@ -719,10 +721,12 @@ public class DFSClient implements FSConstants, java.io.Closeable {
     if(LOG.isDebugEnabled()) {
       LOG.debug(src + ": masked=" + masked);
     }
+    XTraceContext.newTrace();
     final DFSOutputStream result = new DFSOutputStream(this, src, masked,
         flag, createParent, replication, blockSize, progress, buffersize,
         conf.getInt(DFSConfigKeys.DFS_BYTES_PER_CHECKSUM_KEY, 
                     DFSConfigKeys.DFS_BYTES_PER_CHECKSUM_DEFAULT));
+    XTraceContext.endTrace();
     leaserenewer.put(src, result, this);
     return result;
   }
@@ -732,6 +736,7 @@ public class DFSClient implements FSConstants, java.io.Closeable {
    */
   private DFSOutputStream primitiveAppend(String src, EnumSet<CreateFlag> flag,
       int buffersize, Progressable progress) throws IOException {
+    XTraceContext.newTrace();
     if (flag.contains(CreateFlag.APPEND)) {
       HdfsFileStatus stat = getFileInfo(src);
       if (stat == null) { // No file to append to
@@ -740,10 +745,14 @@ public class DFSClient implements FSConstants, java.io.Closeable {
           throw new FileNotFoundException("failed to append to non-existent file "
               + src + " on client " + clientName);
         }
+        XTraceContext.endTrace();
         return null;
       }
-      return callAppend(stat, src, buffersize, progress);
+      DFSOutputStream result = callAppend(stat, src, buffersize, progress);
+      XTraceContext.endTrace();
+      return result;
     }
+    XTraceContext.endTrace();
     return null;
   }
   
@@ -763,6 +772,7 @@ public class DFSClient implements FSConstants, java.io.Closeable {
                              int bytesPerChecksum)
       throws IOException, UnresolvedLinkException {
     checkOpen();
+    XTraceContext.newTrace();
     CreateFlag.validate(flag);
     DFSOutputStream result = primitiveAppend(src, flag, buffersize, progress);
     if (result == null) {
@@ -770,6 +780,7 @@ public class DFSClient implements FSConstants, java.io.Closeable {
           flag, createParent, replication, blockSize, progress, buffersize,
           bytesPerChecksum);
     }
+    XTraceContext.endTrace();
     leaserenewer.put(src, result, this);
     return result;
   }
@@ -782,6 +793,7 @@ public class DFSClient implements FSConstants, java.io.Closeable {
   public void createSymlink(String target, String link, boolean createParent)
       throws IOException {
     try {
+      XTraceContext.newTrace();
       FsPermission dirPerm = 
           FsPermission.getDefault().applyUMask(FsPermission.getUMask(conf)); 
       namenode.createSymlink(target, link, dirPerm, createParent);
@@ -793,6 +805,8 @@ public class DFSClient implements FSConstants, java.io.Closeable {
                                      NSQuotaExceededException.class, 
                                      DSQuotaExceededException.class,
                                      UnresolvedPathException.class);
+    } finally {
+      XTraceContext.endTrace();
     }
   }
 
@@ -804,10 +818,13 @@ public class DFSClient implements FSConstants, java.io.Closeable {
   public String getLinkTarget(String path) throws IOException { 
     checkOpen();
     try {
+      XTraceContext.newTrace();
       return namenode.getLinkTarget(path);
     } catch (RemoteException re) {
       throw re.unwrapRemoteException(AccessControlException.class,
                                      FileNotFoundException.class);
+    } finally {
+      XTraceContext.endTrace();
     }
   }
 
@@ -842,6 +859,7 @@ public class DFSClient implements FSConstants, java.io.Closeable {
    */
   DFSOutputStream append(String src, int buffersize, Progressable progress) 
       throws IOException {
+    XTraceContext.newTrace();
     checkOpen();
     HdfsFileStatus stat = getFileInfo(src);
     if (stat == null) { // No file found
@@ -850,6 +868,7 @@ public class DFSClient implements FSConstants, java.io.Closeable {
     }
     final DFSOutputStream result = callAppend(stat, src, buffersize, progress);
     leaserenewer.put(src, result, this);
+    XTraceContext.endTrace();
     return result;
   }
 
@@ -863,6 +882,7 @@ public class DFSClient implements FSConstants, java.io.Closeable {
   public boolean setReplication(String src, short replication)
       throws IOException {
     try {
+      XTraceContext.newTrace();
       return namenode.setReplication(src, replication);
     } catch(RemoteException re) {
       throw re.unwrapRemoteException(AccessControlException.class,
@@ -870,6 +890,8 @@ public class DFSClient implements FSConstants, java.io.Closeable {
                                      SafeModeException.class,
                                      DSQuotaExceededException.class,
                                      UnresolvedPathException.class);
+    } finally {
+      XTraceContext.endTrace();
     }
   }
 
@@ -882,12 +904,15 @@ public class DFSClient implements FSConstants, java.io.Closeable {
   public boolean rename(String src, String dst) throws IOException {
     checkOpen();
     try {
+      XTraceContext.newTrace();
       return namenode.rename(src, dst);
     } catch(RemoteException re) {
       throw re.unwrapRemoteException(AccessControlException.class,
                                      NSQuotaExceededException.class,
                                      DSQuotaExceededException.class,
                                      UnresolvedPathException.class);
+    } finally {
+      XTraceContext.endTrace();
     }
   }
 
@@ -898,10 +923,13 @@ public class DFSClient implements FSConstants, java.io.Closeable {
   public void concat(String trg, String [] srcs) throws IOException {
     checkOpen();
     try {
+      XTraceContext.newTrace();
       namenode.concat(trg, srcs);
     } catch(RemoteException re) {
       throw re.unwrapRemoteException(AccessControlException.class,
                                      UnresolvedPathException.class);
+    } finally {
+      XTraceContext.endTrace();
     }
   }
   /**
@@ -912,6 +940,7 @@ public class DFSClient implements FSConstants, java.io.Closeable {
       throws IOException {
     checkOpen();
     try {
+      XTraceContext.newTrace();
       namenode.rename(src, dst, options);
     } catch(RemoteException re) {
       throw re.unwrapRemoteException(AccessControlException.class,
@@ -922,6 +951,8 @@ public class DFSClient implements FSConstants, java.io.Closeable {
                                      SafeModeException.class,
                                      NSQuotaExceededException.class,
                                      UnresolvedPathException.class);
+    } finally {
+      XTraceContext.endTrace();
     }
   }
   /**
@@ -931,7 +962,10 @@ public class DFSClient implements FSConstants, java.io.Closeable {
   @Deprecated
   public boolean delete(String src) throws IOException {
     checkOpen();
-    return namenode.delete(src, true);
+    XTraceContext.newTrace();
+    boolean result = namenode.delete(src, true);
+    XTraceContext.endTrace();
+    return result;
   }
 
   /**
@@ -944,12 +978,15 @@ public class DFSClient implements FSConstants, java.io.Closeable {
   public boolean delete(String src, boolean recursive) throws IOException {
     checkOpen();
     try {
+      XTraceContext.newTrace();
       return namenode.delete(src, recursive);
     } catch(RemoteException re) {
       throw re.unwrapRemoteException(AccessControlException.class,
                                      FileNotFoundException.class,
                                      SafeModeException.class,
                                      UnresolvedPathException.class);
+    } finally {
+      XTraceContext.endTrace();
     }
   }
   
@@ -983,11 +1020,14 @@ public class DFSClient implements FSConstants, java.io.Closeable {
     throws IOException {
     checkOpen();
     try {
+      XTraceContext.newTrace();
       return namenode.getListing(src, startAfter, needLocation);
     } catch(RemoteException re) {
       throw re.unwrapRemoteException(AccessControlException.class,
                                      FileNotFoundException.class,
                                      UnresolvedPathException.class);
+    } finally {
+      XTraceContext.endTrace();
     }
   }
 
@@ -1002,11 +1042,14 @@ public class DFSClient implements FSConstants, java.io.Closeable {
   public HdfsFileStatus getFileInfo(String src) throws IOException {
     checkOpen();
     try {
+      XTraceContext.newTrace();
       return namenode.getFileInfo(src);
     } catch(RemoteException re) {
       throw re.unwrapRemoteException(AccessControlException.class,
                                      FileNotFoundException.class,
                                      UnresolvedPathException.class);
+    } finally {
+      XTraceContext.endTrace();
     }
   }
 
@@ -1021,12 +1064,15 @@ public class DFSClient implements FSConstants, java.io.Closeable {
   public HdfsFileStatus getFileLinkInfo(String src) throws IOException {
     checkOpen();
     try {
+      XTraceContext.newTrace();
       return namenode.getFileLinkInfo(src);
     } catch(RemoteException re) {
       throw re.unwrapRemoteException(AccessControlException.class,
-                                     UnresolvedPathException.class);
-     }
-   }
+                                    UnresolvedPathException.class);
+    } finally {
+      XTraceContext.endTrace();
+    }
+  }
 
   /**
    * Get the checksum of a file.
@@ -1047,6 +1093,7 @@ public class DFSClient implements FSConstants, java.io.Closeable {
   public static MD5MD5CRC32FileChecksum getFileChecksum(String src,
       ClientProtocol namenode, SocketFactory socketFactory, int socketTimeout
       ) throws IOException {
+    XTraceContext.newTrace();
     //get all block locations
     List<LocatedBlock> locatedblocks
         = callGetBlockLocations(namenode, src, 0, Long.MAX_VALUE).getLocatedBlocks();
@@ -1163,6 +1210,7 @@ public class DFSClient implements FSConstants, java.io.Closeable {
 
     //compute file MD5
     final MD5Hash fileMD5 = MD5Hash.digest(md5out.getData()); 
+    XTraceContext.endTrace();
     return new MD5MD5CRC32FileChecksum(bytesPerCRC, crcPerBlock, fileMD5);
   }
 
@@ -1177,12 +1225,15 @@ public class DFSClient implements FSConstants, java.io.Closeable {
       throws IOException {
     checkOpen();
     try {
+      XTraceContext.newTrace();
       namenode.setPermission(src, permission);
     } catch(RemoteException re) {
       throw re.unwrapRemoteException(AccessControlException.class,
                                      FileNotFoundException.class,
                                      SafeModeException.class,
                                      UnresolvedPathException.class);
+    } finally {
+      XTraceContext.endTrace();
     }
   }
 
@@ -1198,12 +1249,15 @@ public class DFSClient implements FSConstants, java.io.Closeable {
       throws IOException {
     checkOpen();
     try {
+      XTraceContext.newTrace();
       namenode.setOwner(src, username, groupname);
     } catch(RemoteException re) {
       throw re.unwrapRemoteException(AccessControlException.class,
                                      FileNotFoundException.class,
                                      SafeModeException.class,
                                      UnresolvedPathException.class);                                   
+    } finally {
+      XTraceContext.endTrace();
     }
   }
 
@@ -1211,7 +1265,9 @@ public class DFSClient implements FSConstants, java.io.Closeable {
    * @see ClientProtocol#getStats()
    */
   public FsStatus getDiskStatus() throws IOException {
+    XTraceContext.newTrace();
     long rawNums[] = namenode.getStats();
+    XTraceContext.endTrace();
     return new FsStatus(rawNums[0], rawNums[1], rawNums[2]);
   }
 
@@ -1221,7 +1277,12 @@ public class DFSClient implements FSConstants, java.io.Closeable {
    * @throws IOException
    */ 
   public long getMissingBlocksCount() throws IOException {
-    return namenode.getStats()[ClientProtocol.GET_STATS_MISSING_BLOCKS_IDX];
+    try {
+      XTraceContext.newTrace();
+      return namenode.getStats()[ClientProtocol.GET_STATS_MISSING_BLOCKS_IDX];
+    } finally {
+      XTraceContext.endTrace();
+    }
   }
   
   /**
@@ -1229,7 +1290,12 @@ public class DFSClient implements FSConstants, java.io.Closeable {
    * @throws IOException
    */ 
   public long getUnderReplicatedBlocksCount() throws IOException {
-    return namenode.getStats()[ClientProtocol.GET_STATS_UNDER_REPLICATED_IDX];
+    try {
+      XTraceContext.newTrace();
+      return namenode.getStats()[ClientProtocol.GET_STATS_UNDER_REPLICATED_IDX];
+    } finally {
+      XTraceContext.endTrace();
+    }
   }
   
   /**
@@ -1237,7 +1303,12 @@ public class DFSClient implements FSConstants, java.io.Closeable {
    * @throws IOException
    */ 
   public long getCorruptBlocksCount() throws IOException {
-    return namenode.getStats()[ClientProtocol.GET_STATS_CORRUPT_BLOCKS_IDX];
+    try {
+      XTraceContext.newTrace();
+      return namenode.getStats()[ClientProtocol.GET_STATS_CORRUPT_BLOCKS_IDX];
+    } finally {
+      XTraceContext.endTrace();
+    }
   }
   
   /**
@@ -1247,12 +1318,22 @@ public class DFSClient implements FSConstants, java.io.Closeable {
   public CorruptFileBlocks listCorruptFileBlocks(String path,
                                                  String cookie)
     throws IOException {
-    return namenode.listCorruptFileBlocks(path, cookie);
+    try {
+      XTraceContext.newTrace();
+      return namenode.listCorruptFileBlocks(path, cookie);
+    } finally {
+      XTraceContext.endTrace();
+    }
   }
 
   public DatanodeInfo[] datanodeReport(DatanodeReportType type)
   throws IOException {
-    return namenode.getDatanodeReport(type);
+    try {
+      XTraceContext.newTrace();
+      return namenode.getDatanodeReport(type);
+    } finally {
+      XTraceContext.endTrace();
+    }
   }
     
   /**
@@ -1261,7 +1342,12 @@ public class DFSClient implements FSConstants, java.io.Closeable {
    * @see ClientProtocol#setSafeMode(FSConstants.SafeModeAction)
    */
   public boolean setSafeMode(SafeModeAction action) throws IOException {
-    return namenode.setSafeMode(action);
+    try {
+      XTraceContext.newTrace();
+      return namenode.setSafeMode(action);
+    } finally {
+      XTraceContext.endTrace();
+    }
   }
 
   /**
@@ -1271,9 +1357,12 @@ public class DFSClient implements FSConstants, java.io.Closeable {
    */
   void saveNamespace() throws AccessControlException, IOException {
     try {
+      XTraceContext.newTrace();
       namenode.saveNamespace();
     } catch(RemoteException re) {
       throw re.unwrapRemoteException(AccessControlException.class);
+    } finally {
+      XTraceContext.endTrace();
     }
   }
   
@@ -1283,7 +1372,12 @@ public class DFSClient implements FSConstants, java.io.Closeable {
    * @see ClientProtocol#restoreFailedStorage(String arg)
    */
   boolean restoreFailedStorage(String arg) throws AccessControlException {
-    return namenode.restoreFailedStorage(arg);
+    try {
+      XTraceContext.newTrace();
+      return namenode.restoreFailedStorage(arg);
+    } finally {
+      XTraceContext.endTrace();
+    }
   }
 
   /**
@@ -1294,7 +1388,9 @@ public class DFSClient implements FSConstants, java.io.Closeable {
    * @see ClientProtocol#refreshNodes()
    */
   public void refreshNodes() throws IOException {
+    XTraceContext.newTrace();
     namenode.refreshNodes();
+    XTraceContext.endTrace();
   }
 
   /**
@@ -1303,14 +1399,18 @@ public class DFSClient implements FSConstants, java.io.Closeable {
    * @see ClientProtocol#metaSave(String)
    */
   public void metaSave(String pathname) throws IOException {
+    XTraceContext.newTrace();
     namenode.metaSave(pathname);
+    XTraceContext.endTrace();
   }
     
   /**
    * @see ClientProtocol#finalizeUpgrade()
    */
   public void finalizeUpgrade() throws IOException {
+    XTraceContext.newTrace();
     namenode.finalizeUpgrade();
+    XTraceContext.endTrace();
   }
 
   /**
@@ -1318,7 +1418,12 @@ public class DFSClient implements FSConstants, java.io.Closeable {
    */
   public UpgradeStatusReport distributedUpgradeProgress(UpgradeAction action)
       throws IOException {
-    return namenode.distributedUpgradeProgress(action);
+    try {
+      XTraceContext.newTrace();
+      return namenode.distributedUpgradeProgress(action);
+    } finally {
+      XTraceContext.endTrace();
+    }
   }
 
   /**
@@ -1352,6 +1457,7 @@ public class DFSClient implements FSConstants, java.io.Closeable {
       LOG.debug(src + ": masked=" + masked);
     }
     try {
+      XTraceContext.newTrace();
       return namenode.mkdirs(src, masked, createParent);
     } catch(RemoteException re) {
       throw re.unwrapRemoteException(AccessControlException.class,
@@ -1362,6 +1468,8 @@ public class DFSClient implements FSConstants, java.io.Closeable {
                                      SafeModeException.class,
                                      NSQuotaExceededException.class,
                                      UnresolvedPathException.class);
+    } finally {
+      XTraceContext.endTrace();
     }
   }
   
@@ -1381,12 +1489,15 @@ public class DFSClient implements FSConstants, java.io.Closeable {
       LOG.debug(src + ": masked=" + absPermission);
     }
     try {
+      XTraceContext.newTrace();
       return namenode.mkdirs(src, absPermission, true);
     } catch(RemoteException re) {
       throw re.unwrapRemoteException(AccessControlException.class,
                                      NSQuotaExceededException.class,
                                      DSQuotaExceededException.class,
                                      UnresolvedPathException.class);
+    } finally {
+      XTraceContext.endTrace();
     }
   }
 
@@ -1398,11 +1509,14 @@ public class DFSClient implements FSConstants, java.io.Closeable {
    */
   ContentSummary getContentSummary(String src) throws IOException {
     try {
+      XTraceContext.newTrace();
       return namenode.getContentSummary(src);
     } catch(RemoteException re) {
       throw re.unwrapRemoteException(AccessControlException.class,
                                      FileNotFoundException.class,
                                      UnresolvedPathException.class);
+    } finally {
+      XTraceContext.endTrace();
     }
   }
 
@@ -1423,6 +1537,7 @@ public class DFSClient implements FSConstants, java.io.Closeable {
                                          
     }
     try {
+      XTraceContext.newTrace();
       namenode.setQuota(src, namespaceQuota, diskspaceQuota);
     } catch(RemoteException re) {
       throw re.unwrapRemoteException(AccessControlException.class,
@@ -1430,6 +1545,8 @@ public class DFSClient implements FSConstants, java.io.Closeable {
                                      NSQuotaExceededException.class,
                                      DSQuotaExceededException.class,
                                      UnresolvedPathException.class);
+    } finally {
+      XTraceContext.endTrace();
     }
   }
 
@@ -1441,11 +1558,14 @@ public class DFSClient implements FSConstants, java.io.Closeable {
   public void setTimes(String src, long mtime, long atime) throws IOException {
     checkOpen();
     try {
+      XTraceContext.newTrace();
       namenode.setTimes(src, mtime, atime);
     } catch(RemoteException re) {
       throw re.unwrapRemoteException(AccessControlException.class,
                                      FileNotFoundException.class,
                                      UnresolvedPathException.class);
+    } finally {
+      XTraceContext.endTrace();
     }
   }
 

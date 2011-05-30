@@ -38,6 +38,8 @@ import org.apache.hadoop.io.Writable;
 import org.apache.hadoop.io.WritableUtils;
 import org.apache.hadoop.security.token.Token;
 
+import edu.berkeley.xtrace.*;
+
 /**
  * Transfer data to/from datanode using a streaming protocol.
  */
@@ -117,16 +119,55 @@ public interface DataTransferProtocol {
 
     /** Read from in */
     public static Status read(DataInput in) throws IOException {
+      int len = in.readInt();
+      if (len > 0) {
+        byte[] md = new byte[len];
+        in.readFully(md);
+        XTraceContext.setThreadContext(XTraceMetadata.createFromBytes(md, 0, len));
+      } else if (len == 0) {
+        XTraceContext.setThreadContext(null);
+      }
       return valueOf(in.readShort());
     }
 
     /** Write to out */
     public void write(DataOutput out) throws IOException {
+      //ww2
+      out.writeInt(-1);
+
+      out.writeShort(code);
+    }
+    
+    //ww2
+    public void write(DataOutput out, XTraceMetadata metadata) throws IOException {
+      if (metadata == null)
+        out.writeInt(0);
+      else {
+        byte[] md = metadata.pack();
+        out.writeInt(md.length);
+        out.write(md);
+      }
       out.writeShort(code);
     }
 
     /** Write to out */
     public void writeOutputStream(OutputStream out) throws IOException {
+      //ww2
+      out.write(new byte[] {(byte)0xff, (byte)0xff, (byte)0xff, (byte)0xff});
+
+      out.write(new byte[] {(byte)(code >>> 8), (byte)code});
+    }
+    
+    public void writeOutputStream(OutputStream out, XTraceMetadata metadata) throws IOException {
+      if (metadata == null)
+        out.write(new byte[] {0,0,0,0});
+      else {
+        byte[] md = metadata.pack();
+        int l = md.length;
+        out.write(new byte[] {(byte)(l >>> 24), (byte)(l >>> 16),
+                              (byte)(l >>> 8), (byte)l});
+        out.write(md);
+      }
       out.write(new byte[] {(byte)(code >>> 8), (byte)code});
     }
   };
@@ -206,6 +247,16 @@ public interface DataTransferProtocol {
       out.writeLong(blockLen);
       Text.writeString(out, clientName);
       blockToken.write(out);
+      
+      //ww2
+      if (XTraceContext.getThreadContext() != null) {
+        byte[] md = XTraceContext.getThreadContext().pack();
+        out.writeInt(md.length);
+        out.write(md, 0, md.length);
+      } else {
+        out.writeInt(0);
+      }
+
       out.flush();
     }
     
@@ -231,6 +282,15 @@ public interface DataTransferProtocol {
       }
       write(out, 1, targets);
       blockToken.write(out);
+      
+      //ww2
+      if (XTraceContext.getThreadContext() != null) {
+        byte[] md = XTraceContext.getThreadContext().pack();
+        out.writeInt(md.length);
+        out.write(md, 0, md.length);
+      } else {
+        out.writeInt(0);
+      }
     }
 
     /** Send {@link Op#TRANSFER_BLOCK} */
@@ -341,6 +401,15 @@ public interface DataTransferProtocol {
       final String client = Text.readString(in);
       final Token<BlockTokenIdentifier> blockToken = readBlockToken(in);
 
+      final int len = in.readInt();
+      if (len > 0) {
+        byte[] md = new byte[len];
+        in.read(md);
+        XTraceContext.setThreadContext(XTraceMetadata.createFromBytes(md, 0, len));
+      } else
+        XTraceContext.setThreadContext(null);
+      XTraceContext.opReadBlockReceive("Datanode");
+
       opReadBlock(in, blk, offset, length, client, blockToken);
     }
 
@@ -366,6 +435,15 @@ public interface DataTransferProtocol {
 
       final DatanodeInfo targets[] = readDatanodeInfos(in);
       final Token<BlockTokenIdentifier> blockToken = readBlockToken(in);
+
+      final int len = in.readInt();
+      if (len > 0) {
+        byte[] md = new byte[len];
+        in.read(md);
+        XTraceContext.setThreadContext(XTraceMetadata.createFromBytes(md, 0, len));
+      } else
+        XTraceContext.setThreadContext(null);
+      XTraceContext.opWriteBlockReceive("Datanode");
 
       opWriteBlock(in, blk, pipelineSize, stage,
           newGs, minBytesRcvd, maxBytesRcvd, client, src, targets, blockToken);
@@ -486,6 +564,8 @@ public interface DataTransferProtocol {
     private long seqno;
     private Status replies[];
     public final static long UNKOWN_SEQNO = -2;
+    //ww2
+    public XTraceMetadata metadata = null;
 
     /** default constructor **/
     public PipelineAck() {
@@ -551,6 +631,15 @@ public interface DataTransferProtocol {
       for (int i=0; i<numOfReplies; i++) {
         replies[i] = Status.read(in);
       }
+      
+      //ww2
+      int len = in.readInt();
+      if (len > 0) {
+        byte[] md = new byte[len];
+        in.readFully(md);
+        metadata = XTraceMetadata.createFromBytes(md, 0, len);
+      } else
+        metadata = null;
     }
 
     @Override // Writable
@@ -560,6 +649,15 @@ public interface DataTransferProtocol {
       out.writeShort((short)replies.length);
       for(Status reply : replies) {
         reply.write(out);
+      }
+      
+      //ww2
+      if (metadata == null)
+        out.writeInt(0);
+      else {
+        byte[] md = metadata.pack();
+        out.writeInt(md.length);
+        out.write(md);
       }
     }
     
@@ -584,13 +682,16 @@ public interface DataTransferProtocol {
                                                8 + /* offset in block */
                                                8 + /* seqno */
                                                1 + /* isLastPacketInBlock */
-                                               4   /* data length */ );
+                                               4 + /* data length */ 
+                                               17 ); //ww2
 
     private int packetLen;
     private long offsetInBlock;
     private long seqno;
     private boolean lastPacketInBlock;
     private int dataLen;
+    //ww2
+    public XTraceMetadata metadata = null;
 
     public PacketHeader() {
     }
@@ -648,6 +749,14 @@ public interface DataTransferProtocol {
       seqno = in.readLong();
       lastPacketInBlock = in.readBoolean();
       dataLen = in.readInt();
+      
+      byte[] md = new byte[17];
+      in.readFully(md);
+      XTraceMetadata temp = XTraceMetadata.createFromBytes(md, 0, 17);
+      if (temp.isValid())
+        metadata = temp;
+      else
+        metadata = null;
     }
 
     public void readFields(ByteBuffer buf) throws IOException {
@@ -656,6 +765,14 @@ public interface DataTransferProtocol {
       seqno = buf.getLong();
       lastPacketInBlock = (buf.get() != 0);
       dataLen = buf.getInt();
+      
+      byte[] md = new byte[17];
+      buf.get(md);
+      XTraceMetadata temp = XTraceMetadata.createFromBytes(md, 0, 17);
+      if (temp.isValid())
+        metadata = temp;
+      else
+        metadata = null;
     }
 
     @Override
@@ -665,6 +782,14 @@ public interface DataTransferProtocol {
       out.writeLong(seqno);
       out.writeBoolean(lastPacketInBlock);
       out.writeInt(dataLen);
+      
+      if (metadata == null)
+        out.write(new byte[17]);
+      else
+        out.write(metadata.pack());
+    }
+
+    /**
     }
 
     /**
@@ -677,6 +802,11 @@ public interface DataTransferProtocol {
         .putLong(seqno)
         .put((byte)(lastPacketInBlock ? 1 : 0))
         .putInt(dataLen);
+      
+      if (metadata == null)
+        buf.put(new byte[17]);
+      else
+        buf.put(metadata.pack());
     }
 
     /**

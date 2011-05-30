@@ -45,6 +45,8 @@ import org.apache.hadoop.net.NetUtils;
 import org.apache.hadoop.security.token.Token;
 import org.apache.hadoop.util.DataChecksum;
 
+import edu.berkeley.xtrace.*;
+
 /** This is a wrapper around connection to datanode
  * and understands checksum, offset etc
  */
@@ -191,8 +193,15 @@ public class BlockReader extends FSInputChecker {
                                        int len, byte[] checksumBuf) 
                                        throws IOException {
     // Read one chunk.
+
+    //ww2
+    XTraceContext.newTrace();
+    XTraceContext.callStart("DFSClient", "readChunk");
+
     if ( gotEOS ) {
       // Already hit EOF
+      XTraceContext.callEnd("DFSClient", "readChunk");
+      XTraceContext.endTrace();
       return -1;
     }
     
@@ -214,6 +223,10 @@ public class BlockReader extends FSInputChecker {
     // Read next packet if the previous packet has been read completely.
     if (dataLeft <= 0) {
       //Read packet headers.
+
+      //ww2
+      //XTraceContext.callStart("DFSClient", "readNextPacket");
+
       PacketHeader header = new PacketHeader();
       header.readFields(in);
 
@@ -223,7 +236,9 @@ public class BlockReader extends FSInputChecker {
 
       // Sanity check the lengths
       if (!header.sanityCheck(lastSeqNo)) {
-           throw new IOException("BlockReader: error in packet header " +
+        XTraceContext.callError("DFSClient", "readChunk");
+        XTraceContext.endTrace();
+        throw new IOException("BlockReader: error in packet header " +
                                  header);
       }
 
@@ -234,6 +249,7 @@ public class BlockReader extends FSInputChecker {
         IOUtils.readFully(in, checksumBytes.array(), 0,
                           checksumBytes.limit());
       }
+      //XTraceContexto.callEnd("DFSClient", "readNextPacket");
     }
 
     // Sanity checks
@@ -299,6 +315,8 @@ public class BlockReader extends FSInputChecker {
 
       if (!lastPacketInBlock ||
           dataLen != 0) {
+        XTraceContext.callError("DFSClient", "readChunk");
+        XTraceContext.endTrace();
         throw new IOException("Expected empty end-of-read packet! Header: " +
                               "(packetLen : " + packetLen + 
                               ", offsetInBlock : " + offsetInBlock +
@@ -311,9 +329,13 @@ public class BlockReader extends FSInputChecker {
     }
 
     if ( bytesToRead == 0 ) {
+      XTraceContext.callEnd("DFSClient", "readChunk");
+      XTraceContext.endTrace();
       return -1;
     }
 
+    XTraceContext.callEnd("DFSClient", "readChunk");
+    XTraceContext.endTrace();
     return bytesToRead;
   }
   
@@ -372,6 +394,10 @@ public class BlockReader extends FSInputChecker {
                                      String clientName)
                                      throws IOException {
     // in and out will be closed when sock is closed (by the caller)
+
+    //ww2
+    XTraceContext.opReadBlockRequest("DFSClient");
+
     DataTransferProtocol.Sender.opReadBlock(
         new DataOutputStream(new BufferedOutputStream(
             NetUtils.getOutputStream(sock,HdfsConstants.WRITE_TIMEOUT))),
@@ -387,6 +413,9 @@ public class BlockReader extends FSInputChecker {
     
     DataTransferProtocol.Status status = DataTransferProtocol.Status.read(in);
     if (status != SUCCESS) {
+
+      XTraceContext.opReadBlockFailure("DFSClient");
+
       if (status == ERROR_ACCESS_TOKEN) {
         throw new InvalidBlockTokenException(
             "Got access token error for OP_READ_BLOCK, self="
@@ -402,6 +431,9 @@ public class BlockReader extends FSInputChecker {
             + block.getBlockId() + "_" + block.getGenerationStamp());
       }
     }
+
+    XTraceContext.opReadBlockSuccess("DFSClient");
+
     DataChecksum checksum = DataChecksum.newDataChecksum( in );
     //Warning when we get CHECKSUM_NULL?
     
