@@ -691,7 +691,7 @@ class DFSOutputStream extends FSOutputSummer implements Syncable {
                                     " for block " + block +
                                     one.seqno + " but received " + seqno);
             }
-            XTraceContext.acceptAck("DFSClient", seqno, previousAck); 
+            previousAck = XTraceContext.acceptAck("DFSClient", seqno, previousAck); 
             isLastPacketInBlock = one.lastPacketInBlock;
             // update bytesAcked
             block.setNumBytes(one.getLastByteOffsetBlock());
@@ -1044,9 +1044,9 @@ class DFSOutputStream extends FSOutputSummer implements Syncable {
         pipelineStatus = DataTransferProtocol.Status.read(blockReplyStream);
         firstBadLink = Text.readString(blockReplyStream);
         if (pipelineStatus != SUCCESS) {
+          XTraceContext.opWriteBlockFailure("DFSClient");
+          XTraceContext.endTrace();
           if (pipelineStatus == ERROR_ACCESS_TOKEN) {
-            XTraceContext.opWriteBlockFailure("DFSClient");
-            XTraceContext.endTrace();
             throw new InvalidBlockTokenException(
                 "Got access token error for connect ack with firstBadLink as "
                     + firstBadLink);

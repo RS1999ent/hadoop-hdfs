@@ -1094,6 +1094,7 @@ public class DFSClient implements FSConstants, java.io.Closeable {
       ClientProtocol namenode, SocketFactory socketFactory, int socketTimeout
       ) throws IOException {
     XTraceContext.newTrace();
+    XTraceContext.callStart("DFSClient", "getFileChecksum");
     //get all block locations
     List<LocatedBlock> locatedblocks
         = callGetBlockLocations(namenode, src, 0, Long.MAX_VALUE).getLocatedBlocks();
@@ -1158,6 +1159,8 @@ public class DFSClient implements FSConstants, java.io.Closeable {
               refetchBlocks = true;
               break;
             } else {
+              XTraceContext.callError("DFSClient", "getFileChecksum");
+              XTraceContext.endTrace();
               throw new IOException("Bad response " + reply + " for block "
                   + block + " from datanode " + datanodes[j].getName());
             }
@@ -1169,6 +1172,8 @@ public class DFSClient implements FSConstants, java.io.Closeable {
             bytesPerCRC = bpc;
           }
           else if (bpc != bytesPerCRC) {
+            XTraceContext.callError("DFSClient", "getFileChecksum");
+            XTraceContext.endTrace();
             throw new IOException("Byte-per-checksum not matched: bpc=" + bpc
                 + " but bytesPerCRC=" + bytesPerCRC);
           }
@@ -1204,12 +1209,15 @@ public class DFSClient implements FSConstants, java.io.Closeable {
       }
 
       if (!done) {
+        XTraceContext.callError("DFSClient", "getFileChecksum");
+        XTraceContext.endTrace();
         throw new IOException("Fail to get block MD5 for " + block);
       }
     }
 
     //compute file MD5
     final MD5Hash fileMD5 = MD5Hash.digest(md5out.getData()); 
+    XTraceContext.callEnd("DFSClient", "getFileChecksum");
     XTraceContext.endTrace();
     return new MD5MD5CRC32FileChecksum(bytesPerCRC, crcPerBlock, fileMD5);
   }
